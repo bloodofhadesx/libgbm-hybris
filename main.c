@@ -89,6 +89,7 @@ static int hybris_gbm_is_supported_format(uint32_t format)
     case GBM_FORMAT_RGB888:
     case GBM_FORMAT_RGB565:
     case GBM_FORMAT_ARGB8888:
+    case GBM_FORMAT_XRGB8888:
     case GBM_FORMAT_GR88:
     case GBM_FORMAT_ABGR16161616F:
     case GBM_FORMAT_ABGR2101010:
@@ -170,8 +171,9 @@ static int get_hal_pixel_format(uint32_t gbm_format)
     case GBM_FORMAT_RGB565:
         format = HAL_PIXEL_FORMAT_RGB_565;
         break;
+    case GBM_FORMAT_XRGB8888:
     case GBM_FORMAT_ARGB8888:
-        format = HAL_PIXEL_FORMAT_BGRA_8888;
+        format = HAL_PIXEL_FORMAT_RGBA_8888;
         break;
     case GBM_FORMAT_GR88:
         /* GR88 corresponds to YV12 which is planar */
@@ -410,6 +412,23 @@ int hybris_gbm_surface_get_info(struct gbm_surface *surface,
     return 0;
 }
 
+static bool
+hybris_gbm_surface_bo_is_locked(struct gbm_hybris_surface *hsurf,
+                                struct gbm_hybris_bo *bo)
+{
+    unsigned int i;
+
+    if (!hsurf || !bo)
+        return false;
+
+    for (i = 0; i < hsurf->locked_count; ++i) {
+        if (hsurf->locked[i] == bo)
+            return true;
+    }
+
+    return false;
+}
+
 int hybris_gbm_surface_has_free_buffers(struct gbm_surface *surface)
 {
     struct gbm_hybris_surface *hsurf = (struct gbm_hybris_surface *)surface;
@@ -419,10 +438,10 @@ int hybris_gbm_surface_has_free_buffers(struct gbm_surface *surface)
         return 0;
     }
 
-    if (hsurf->bo_count == 0)
+    if (!hsurf->front_bo)
         return 1;
 
-    return hsurf->bo_count > hsurf->locked_count ? 1 : 0;
+    return !hybris_gbm_surface_bo_is_locked(hsurf, hsurf->front_bo);
 }
 
 static bool
@@ -439,23 +458,6 @@ hybris_gbm_surface_bo_is_known(struct gbm_hybris_surface *hsurf,
 
     for (i = 0; i < hsurf->bo_count; ++i) {
         if (hsurf->bo[i] == bo)
-            return true;
-    }
-
-    return false;
-}
-
-static bool
-hybris_gbm_surface_bo_is_locked(struct gbm_hybris_surface *hsurf,
-                                struct gbm_hybris_bo *bo)
-{
-    unsigned int i;
-
-    if (!hsurf || !bo)
-        return false;
-
-    for (i = 0; i < hsurf->locked_count; ++i) {
-        if (hsurf->locked[i] == bo)
             return true;
     }
 
