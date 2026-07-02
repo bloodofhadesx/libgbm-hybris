@@ -15,6 +15,15 @@ jobs:
 
       - name: install build dependencies
         run: |
+          set -eux
+          # The Lindroid Halium repo (repo.lindroid.org) sometimes drops TLS
+          # connections mid-download, so crank up apt's retry/timeout settings
+          # and retry the install a few times.
+          cat >> /etc/apt/apt.conf.d/99lindroid <<'EOF'
+          Acquire::Retries "10";
+          Acquire::https::Timeout "60";
+          Acquire::https::LowSpeedTimeout "120";
+          EOF
           # ca-certificates first, so apt can verify repo.lindroid.org's TLS cert
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates
@@ -23,11 +32,22 @@ jobs:
           echo "deb [trusted=yes] https://repo.lindroid.org/repository/lindroid trixie main" \
             > /etc/apt/sources.list.d/lindroid.list
           apt-get update
-          apt-get install -y --no-install-recommends \
-            build-essential pkg-config \
-            debhelper-compat cmake g++ \
-            libdrm-dev libgbm-dev libhybris-dev android-headers \
-            devscripts
+          for attempt in 1 2 3 4 5; do
+            if apt-get install -y --no-install-recommends \
+                 build-essential pkg-config \
+                 debhelper-compat cmake g++ \
+                 libdrm-dev libgbm-dev libhybris-dev android-headers \
+                 devscripts; then
+              break
+            fi
+            echo "apt install attempt $attempt failed, retrying in 5s..."
+            sleep 5
+            apt-get update
+            if [ "$attempt" = 5 ]; then
+              echo "apt install failed after 5 attempts"
+              exit 1
+            fi
+          done
 
       - name: build debian package
         run: |
