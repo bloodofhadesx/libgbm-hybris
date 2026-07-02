@@ -1,0 +1,37 @@
+name: build-trixie-arm64
+
+on:
+  push:
+    branches: [ lindroid-fix ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: debian:trixie
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates pkg-config \
+            debhelper-compat cmake g++ \
+            libdrm-dev libgbm-dev libhybris-dev android-headers \
+            devscripts
+
+      - name: build debian package
+        run: |
+          dpkg-buildpackage -b -uc -us -tc
+          mkdir -p out
+          cp ../*.deb out/ 2>/dev/null || true
+          cp ../*.changes out/ 2>/dev/null || true
+          ls -l out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libgbm-hybris-trixie-arm64
+          path: out/*
+          if-no-files-found: error
