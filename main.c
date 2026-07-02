@@ -148,14 +148,6 @@ static int get_hal_pixel_format(uint32_t gbm_format)
     case GBM_FORMAT_ARGB8888:
         format = HAL_PIXEL_FORMAT_BGRA_8888;
         break;
-    case GBM_FORMAT_XRGB8888:
-        /* XRGB8888 is B,G,R,X in memory; BGRA_8888 is B,G,R,A. The 4th byte is
-         * ignored for XRGB, so the layouts match. Without this the XRGB8888
-         * request fell through to the default (RGBA_8888 = R,G,B,A), which does
-         * not match the XRGB8888 fourcc and swaps R/B for any dma-buf importer
-         * that trusts the fourcc. */
-        format = HAL_PIXEL_FORMAT_BGRA_8888;
-        break;
     case GBM_FORMAT_GR88:
         /* GR88 corresponds to YV12 which is planar */
         format = HAL_PIXEL_FORMAT_YV12;
