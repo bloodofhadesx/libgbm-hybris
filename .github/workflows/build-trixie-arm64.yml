@@ -15,6 +15,10 @@ jobs:
 
       - name: install build dependencies
         run: |
+          # android-headers + libhybris-dev live in the Lindroid Halium repo,
+          # not in Debian proper; libhybris-dev pulls android-headers in.
+          echo "deb [trusted=yes] https://repo.lindroid.org/repository/lindroid trixie main" \
+            > /etc/apt/sources.list.d/lindroid.list
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential ca-certificates pkg-config \
