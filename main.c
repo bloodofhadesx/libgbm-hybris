@@ -1,5 +1,6 @@
 #include <fcntl.h> 
 #include <stddef.h>
+#include <unistd.h>
 #include <xf86drm.h>
 #include <drm/drm_fourcc.h>
 
@@ -25,6 +26,7 @@
 #include <assert.h>
 
 #define DRM_EVDI_GBM_ADD_BUFF 0x05
+#define DRM_EVDI_GBM_GET_BUFF 0x06
 #define DRM_EVDI_GBM_DEL_BUFF 0x0B
 #define DRM_EVDI_GBM_CREATE_BUFF 0x0C
 
@@ -34,12 +36,32 @@
 #define DRM_IOCTL_EVDI_GBM_ADD_BUFF DRM_IOWR(DRM_COMMAND_BASE +  \
 	DRM_EVDI_GBM_ADD_BUFF, struct drm_evdi_gbm_add_buf)
 
+#define DRM_IOCTL_EVDI_GBM_GET_BUFF DRM_IOWR(DRM_COMMAND_BASE +  \
+	DRM_EVDI_GBM_GET_BUFF, struct drm_evdi_gbm_get_buff)
+
 #define DRM_IOCTL_EVDI_GBM_CREATE_BUFF DRM_IOWR(DRM_COMMAND_BASE +  \
 	DRM_EVDI_GBM_CREATE_BUFF, struct drm_evdi_gbm_create_buff)
 
 struct drm_evdi_gbm_add_buf {
 	int fd;
 	int id;
+};
+
+/* Mirror of the kernel's evdi_gralloc_buf_user: 3 header ints followed by
+ * numFds fd slots + numInts int slots. The kernel installs real dma-buf fds
+ * into data[0..numFds-1] when answering DRM_IOCTL_EVDI_GBM_GET_BUFF. */
+#define GBM_HYBRIS_GRALLOC_MAX_FDS  32
+#define GBM_HYBRIS_GRALLOC_MAX_INTS 128
+struct gbm_hybris_gralloc_buf_user {
+	int version;
+	int numFds;
+	int numInts;
+	int data[GBM_HYBRIS_GRALLOC_MAX_FDS + GBM_HYBRIS_GRALLOC_MAX_INTS];
+};
+
+struct drm_evdi_gbm_get_buff {
+	int id;
+	void *native_handle;
 };
 
 struct drm_evdi_gbm_del_buff {
@@ -124,6 +146,14 @@ static int get_hal_pixel_format(uint32_t gbm_format)
         format = HAL_PIXEL_FORMAT_RGB_565;
         break;
     case GBM_FORMAT_ARGB8888:
+        format = HAL_PIXEL_FORMAT_BGRA_8888;
+        break;
+    case GBM_FORMAT_XRGB8888:
+        /* XRGB8888 is B,G,R,X in memory; BGRA_8888 is B,G,R,A. The 4th byte is
+         * ignored for XRGB, so the layouts match. Without this the XRGB8888
+         * request fell through to the default (RGBA_8888 = R,G,B,A), which does
+         * not match the XRGB8888 fourcc and swaps R/B for any dma-buf importer
+         * that trusts the fourcc. */
         format = HAL_PIXEL_FORMAT_BGRA_8888;
         break;
     case GBM_FORMAT_GR88:
@@ -361,6 +391,39 @@ int hybris_gbm_bo_get_fd(struct gbm_bo* _bo) {
         errno = EINVAL;
         printf("[libgbm-hybris] missing evdi_lindroid_buff_id\n");
         return -1;
+    }
+
+    /* By default gbm_bo_get_fd returns a token memfd carrying the 4-byte
+     * gralloc buffer id; only the in-process lindroid-drm EGL platform can turn
+     * that token back into pixels. External pipewire screencast clients (krfb,
+     * sunshine, ...) cannot, so they either get garbage or force KWin onto the
+     * slow glReadPixels memfd path.
+     *
+     * When GBM_HYBRIS_REAL_DMABUF_FD is set, ask create-disp for the real
+     * gralloc dma-buf fd (via the get-buff ioctl) and hand that out instead, so
+     * the dma-buf is self-describing and readable by any consumer. This needs
+     * eglCreateImageKHR(EGL_LINUX_DMA_BUF_EXT) to import a real dma-buf; if the
+     * lindroid-drm EGL platform can't, KWin falls back to the memfd capture path
+     * (which is still correct and faster for external clients). Opt-in to keep
+     * the default behaviour unchanged. */
+    if (getenv("GBM_HYBRIS_REAL_DMABUF_FD")) {
+        struct gbm_hybris_gralloc_buf_user nh;
+        memset(&nh, 0, sizeof(nh));
+        struct drm_evdi_gbm_get_buff get = {
+            .id = bo->evdi_lindroid_buf_id,
+            .native_handle = &nh,
+        };
+        if (ioctl(_bo->gbm->v0.fd, DRM_IOCTL_EVDI_GBM_GET_BUFF, &get) == 0 &&
+            nh.numFds > 0 && nh.data[0] >= 0) {
+            int real_fd = dup(nh.data[0]);
+            for (int i = 0; i < nh.numFds && i < GBM_HYBRIS_GRALLOC_MAX_FDS; i++) {
+                if (nh.data[i] >= 0)
+                    close(nh.data[i]);
+            }
+            if (real_fd >= 0)
+                return real_fd;
+        }
+        /* fall through to the token memfd on any failure */
     }
 
     int fd = memfd_create("whatever", MFD_CLOEXEC);
