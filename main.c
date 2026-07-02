@@ -410,7 +410,7 @@ int hybris_gbm_bo_get_fd(struct gbm_bo* _bo) {
         struct gbm_hybris_gralloc_buf_user nh;
         memset(&nh, 0, sizeof(nh));
         struct drm_evdi_gbm_get_buff get = {
-            .id = bo->evdi_lindroid_buf_id,
+            .id = bo->evdi_lindroid_buff_id,
             .native_handle = &nh,
         };
         if (ioctl(_bo->gbm->v0.fd, DRM_IOCTL_EVDI_GBM_GET_BUFF, &get) == 0 &&
